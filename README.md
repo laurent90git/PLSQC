@@ -2,11 +2,11 @@
 *(PLSQC)*
 
 This Python package provides the PLSQC class which, given an input 1D array corresponding to a sampled signal, can compute a filtered signal and its derivatives.
-The algorithm is based on splitting the overall sampled time interval in multiple windows of equal length. On each window, a least-square polynomial fit of chosen degree (default is 3) is computed. Continuity constraint (by default up to degree-1).
+The algorithm is based on splitting the overall sampled time interval in multiple windows of equal lengths. On each window, a least-square polynomial fit of chosen degree (default is 3) is computed. Continuity constraint (by default up to degree-1).
 
 ## Tutorial
 The main script itself contains the below example.
-Upon instanciation of the class, the constrained least-square fit is computed.
+Upon instantiation of the class, the constrained least-square fit is computed.
 ```python
 # instantiate and solve the LSQC problem
 obj = PLSQC(x=x, y=y, T=T, continuity=2, deg=3)
