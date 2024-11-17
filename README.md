@@ -21,10 +21,10 @@ The obtained object can then be used to evaluate the fit and its derivatives
 
 Here is a comparison of the PLSQC result and the Savitzki-Golay filter from Scipy on a simple test case :
 
-![signal and filter](img/filtering.png | width=100)
-![first derivative](img/deriv_order0.png | width=100)
-![second derivative](img/deriv_order1.png | width=100)
-![third derivative](img/deriv_order2.png | width=100)
+![signal and filter](img/filtering.png)
+![first derivative](img/deriv_order0.png)
+![second derivative](img/deriv_order1.png)
+![third derivative](img/deriv_order2.png)
 
 Improvements for the future:
 * Faster linear solution with sparse matrices.
