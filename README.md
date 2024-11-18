@@ -27,4 +27,5 @@ Here is a comparison of the PLSQC result and the Savitzki-Golay filter from Scip
 ![third derivative](img/deriv_order2.png)
 
 Improvements for the future:
-* Faster linear solution with sparse matrices.
+* ~~Faster linear solution with sparse matrices.~~
+* Enable custom breakpoints to be specified instead of uniform window length. Each breakpoint should have a specified continuity constraint.
