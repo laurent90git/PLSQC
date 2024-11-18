@@ -21,7 +21,55 @@ Some information may be found on this topic :
 @author: lfrancoi
 """
 import numpy as np
+import scipy.sparse
+import scipy.linalg    
 factorial = np.math.factorial
+
+def color_spy(matrix, normalise_each_row=False, logscale=True):
+    """ plot sparsity pattern with colours depending on the magnitude of the components """
+    valueDres = np.abs(matrix)
+    # valueDres[valueDres==0] = np.nan
+    
+    # each line is divided by its max component
+    if normalise_each_row:
+      for iline in range(valueDres.shape[0]):
+        maxval = np.nanmax(valueDres[iline,:])
+        if maxval !=0:
+            valueDres[iline,:] = valueDres[iline,:] / maxval
+
+    if logscale:
+      valueDres = np.log10(valueDres)
+    
+    lowerLim = np.nanmin(valueDres[np.isinf(valueDres)==0]) # largest non-nan value
+    upperLim = np.nanmax(valueDres[np.isinf(valueDres)==0]) # lowest non-nan value
+    valueDres[np.isinf(valueDres)] = np.nan # so that they are not displayed
+
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    # import matplotlib as mpl
+    # cmap = mpl.colormaps.get_cmap('jet')
+    # plt.imshow(valueDres, interpolation='none', cmap=cmap( np.array(range(20+1)) * cmap.N/20) )
+    plt.imshow(valueDres, interpolation='none', cmap=plt.cm.get_cmap('jet', 20))
+    if normalise_each_row:
+      if logscale:
+        label=r'$\log_10(\dfrac{|M_{i,j}|}{\max_j |M{i,j}|})$'
+      else:
+        label=r'$\dfrac{|M_{i,j}|}{\max_j |M{i,j}|}$'
+    else:
+      if logscale:
+        label = r'$\log_10(|M_{i,j}|)$'
+      else:
+        label= r'$|M_{i,j}|$'
+    plt.colorbar(extend='both', label=label)
+    plt.clim(lowerLim, upperLim)
+    
+    ax.axis('scaled')
+    ax.set_title('Matrix values')
+    ax.grid(which='both')
+    ax.grid(which='minor', alpha=0.5)
+    ax.grid(which='major', alpha=0.9)
 
 class Interpolant():
   """ Polynomial interpolant for a single interval """
@@ -88,7 +136,7 @@ class PLSQC():
   """
   
   def __init__(self, x, y, deg=3, f=None, T=None, continuity=None,
-               overlap=0.5, scale_with_overlap=True, debug=False):
+               overlap=0.5, scale_with_overlap=True, debug=False, mode=1):
     self.x = x # data sampling point
     assert np.all(np.diff(x))>0, 'x must be sorted'
     self.y = y # noisy data
@@ -126,6 +174,7 @@ class PLSQC():
       self.T = self.T /(2 + self.overlap)
       self.f = 1/self.T
     
+    self.mode = mode # solution mode (0=dense, 1=sparse)
     self.debug = debug
     self._solve_constrained_lsq() # compute coefficients
     self._construct_interpolants() # construct the interpolants for each interval
@@ -218,9 +267,21 @@ class PLSQC():
       imax = np.searchsorted(self.x, tip1, side='right', sorter=None) - 1
       assert self.x[imin]>=ti
       assert self.x[imax]<=tip1
+      
+      # assert imax - imin > self.deg + 1 , 'not enough data points' # fit would be exact
+      if imax - imin <= self.deg + 1:
+        # import pdb; pdb.set_trace()
+        print('not enough data points') # fit will be exact
+        print('\twindow t = [{}, {}]'.format(ti, tip1))
+        print(f'\timin = {imin}, imax = {imax}'.format(imin, imax))
+        if imax+1<=imin: # corresponding sampling points is an empty set...
+          print('\tForcing added points')
+          imax = min(imax+1, self.y.size)
+          imin = max(imin-1, 0)
+          
       Y.append(self.y[imin:imax+1])
       X.append(self.x[imin:imax+1])
-      assert imax - imin > self.deg + 1 , 'not enough data points' # fit would be exact
+      
       xcenters.append(tip1o2)
       times_extended.append(ti)
       
@@ -235,12 +296,10 @@ class PLSQC():
     Yr = np.hstack(Y)
     # Xr = np.hstack(X)
     
-    import scipy.sparse
-    M = scipy.sparse.block_diag(Mblocks)
     
+    M = scipy.sparse.block_diag(Mblocks)
     if self.debug:
-        # test without constraint: M coeffs = Y in least-square sense
-        import scipy.linalg
+        # test without constraint: M coeffs = Y in a least-square sense
         Mpinv = scipy.linalg.pinv(M.toarray())
         coeffs = Mpinv @ Yr
         
@@ -268,7 +327,13 @@ class PLSQC():
         plt.xlabel('x')
         plt.ylabel('y')
         plt.title('Test without constraints')
+
         
+    # perform the M.t @ M operation on the blocks directly
+    for i in range(len(Mblocks)):
+      Mblocks[i] = Mblocks[i].T @ Mblocks[i]
+    MtM = scipy.sparse.block_diag(Mblocks)
+
     #%% Construct constraints matrix
     
     # for each connection point between consecutive intervals (excluding the overlap),
@@ -278,6 +343,7 @@ class PLSQC():
     nc = len(self.continuity)
     if nc>0:
       C = np.zeros(( nc * (n-1), n*(self.deg+1) ))
+      # C = scipy.sparse.lil_array( ( nc * (n-1), n*(self.deg+1) ) )
       for i in range(n-1):
         tmid = times[i+1]
         tip1o2 = (times[i+1] +   times[i])*0.5
@@ -294,13 +360,26 @@ class PLSQC():
         C[i*nc:(i+1)*nc, i*(self.deg+1):(i+1)*(self.deg+1)] = diagblock
         C[i*nc:(i+1)*nc, (i+1)*(self.deg+1):(i+2)*(self.deg+1)] = neighborblock
         
-    # Assemble the overall matrix
+    #%% Assemble the overall matrix
+    #  | M.T @ M |  C  |
+    #  |_________|_____|
+    #  |         |     |
+    #  |   C.T   |  0  |
+    
     global_matrix = np.zeros((n*(self.deg+1) + nc*(n-1), n*(self.deg+1)+nc*(n-1)))
     # import pdb; pdb.set_trace()
-    tmp = M.T @ M
-    global_matrix[:n*(self.deg+1),:n*(self.deg+1)] = tmp.toarray()
+    # MtM = M.T @ M
+    global_matrix[:n*(self.deg+1),:n*(self.deg+1)] = MtM.toarray()
     global_matrix[n*(self.deg+1):,:n*(self.deg+1)] = C
     global_matrix[:n*(self.deg+1),n*(self.deg+1):] = C.T
+    
+    # global_matrix =scipy.sparse.bsr_array((n*(self.deg+1) + nc*(n-1), n*(self.deg+1)+nc*(n-1)))
+    # # import pdb; pdb.set_trace()
+    # # MtM = M.T @ M
+    # global_matrix[:n*(self.deg+1),:n*(self.deg+1)] = MtM
+    # global_matrix[n*(self.deg+1):,:n*(self.deg+1)] = C
+    # global_matrix[:n*(self.deg+1),n*(self.deg+1):] = C.T
+    # global_matrix = global_matrix.toarray()
     
     if self.debug:
       import matplotlib.pyplot as plt
@@ -309,9 +388,33 @@ class PLSQC():
       plt.grid()
       plt.title('Global matrix')
       
+      inv = np.linalg.inv(global_matrix)
+      plt.figure()
+      plt.spy(inv)
+      plt.grid()
+      plt.title('Global matrix inverse')
+      
+      color_spy(global_matrix)
+      color_spy(inv)
+      
+      
     b = np.zeros((n*(self.deg+1) + nc*(n-1),))
     b[: n*(self.deg+1)] = M.T @ Yr
-    sol = np.linalg.solve(global_matrix, b)
+    
+    if self.mode==0:
+      ## Dense solve
+      try:
+        sol = np.linalg.solve(global_matrix, b)
+      except np.linalg.LinAlgError as e: # matrix is singular
+        print(e)
+        import pdb; pdb.set_trace()
+        raise e
+    elif self.mode==1:
+      ## Sparse solve
+      global_matrix = scipy.sparse.csr_array( global_matrix )
+      sol = scipy.sparse.linalg.spsolve(global_matrix, b)
+    else:
+      raise ValueError(f'mode {self.mode} unknown')
     
     coeffs = sol[: n*(self.deg+1)]
     # z = sol[n*(self.deg+1):] # lagrange multipliers
@@ -368,7 +471,7 @@ if __name__=='__main__':
   a_noise = 0.3 # noise amplitude
   a_rand = 0.3 # amplitude of the random noise
   
-  x = np.linspace(0, 1/f_signal, 20000) # sampling times
+  x = np.linspace(0, 0.75/f_signal, 20000) # sampling times
   y =   a_signal*np.cos(2*np.pi*f_signal*x) \
       + a_noise*np.cos(2*np.pi*f_noise*x)   \
       + a_rand*2*(np.random.rand(x.size)-0.5) # sampled signal
@@ -399,7 +502,7 @@ if __name__=='__main__':
   plt.ylim(-1.5, 1.5)
   plt.xlim(x[0], x[-1])
   plt.title('Original and filtered signal')
-  plt.savefig('img/filtering.png', dpi=200)
+  plt.savefig('img/filtering.png', dpi=80)
 
   # Compare the obtained filtered derivatives to the exact ones, and to those obtained with
   # other filters
@@ -424,5 +527,4 @@ if __name__=='__main__':
     plt.ylabel(r'$y$')
     plt.xlim(x[0], x[-1])
     plt.title(f'Derivative of order {der}')
-    plt.savefig(f'img/deriv_order{der}.png', dpi=200)
-    
+    plt.savefig(f'img/deriv_order{der}.png', dpi=80)
