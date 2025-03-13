@@ -1,4 +1,4 @@
-# **P**iecewise-Polynomial **L**east-**SQ**uare Fit with **C**ontinuity Constraints
+# **P**iecewise-polynomial **L**east-**SQ**uare Fit with **C**ontinuity constraints
 *(PLSQC)*
 
 This Python package provides the PLSQC class which, given an input 1D array corresponding to a sampled signal, can compute a filtered signal and its derivatives.
