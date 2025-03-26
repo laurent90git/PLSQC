@@ -73,16 +73,25 @@ def color_spy(matrix, normalise_each_row=False, logscale=True):
 
 class Interpolant():
   """ Polynomial interpolant for a single interval """
-  def __init__(self, ta, tb, coeffs, tmid):
+  def __init__(self, ta, tb, coeffs, tmid, ifirst=False, ilast=False):
     self.ta = ta
     self.tb = tb
     self.coeffs = coeffs
     self.tmid = tmid
+    self.ifirst = ifirst
+    self.ilast = ilast
     
   def __call__(self, t, der=0):
     """ Evaluate the polynomial at time t (float or np.ndarray) """
-    assert np.all(t>=self.ta)
-    assert np.all(t<=self.tb)
+    if not self.ifirst: assert np.all(t>=self.ta) # only allow extrapolation to the left for the first interval
+    if not self.ilast: assert np.all(t<=self.tb) # only allow extrapolation to the rightfor the last interval
+    # if not self.ifirst:
+    #   if not np.all(t>=self.ta):
+    #     import pdb; pdb.set_trace()
+    # if not self.ilast:
+    #   if  not np.all(t<=self.tb):
+    #     import pdb; pdb.set_trace()
+    assert der>=0, 'integration is not yet implemented'
     poly = t*0.
     for k in range(der,len(self.coeffs)):
       poly += self.coeffs[k] * factorial(k)/factorial(k-der) * (t - self.tmid )**(k-der)
@@ -128,7 +137,16 @@ class PLSQC():
     debug : logical, optional
       If true, printouts and plots are made to test various aspects of the code.
       The default is False.
-
+    mode: int, optional
+      If mode=0, a dense direct solver is used to solve the linear problem.
+      If mode=1, a sparse direct solver is used. This value is recommended as
+      it usually performs much better.
+    extrap: str, optional
+      If extrap='constant', then the fitted signal will be extrapolated as the 
+      value at the boundaries of the original domain.
+      If extrap='extrap', the polynomial from the last window is used to extrapolate
+      If extrap='error', an error is raised when the fitted polynomial is evaluated
+      outside of the original domain.
     Returns
     -------
     None.
@@ -136,7 +154,8 @@ class PLSQC():
   """
   
   def __init__(self, x, y, deg=3, f=None, T=None, continuity=None,
-               overlap=0.5, scale_with_overlap=True, debug=False, mode=1):
+               overlap=0.5, scale_with_overlap=True, debug=False, extrap='constant',
+               mode=1):
     self.x = x # data sampling point
     assert np.all(np.diff(x))>0, 'x must be sorted'
     self.y = y # noisy data
@@ -144,6 +163,7 @@ class PLSQC():
     assert deg >= 0, 'deg must be >= 0'
     assert isinstance(deg, int), 'deg must be an int'
     self.deg = deg # degrees of the polynomials
+    self.extrap = extrap
     
     if continuity is None:
       self.continuity = np.array(range(deg)) # up to deg-1
@@ -186,7 +206,9 @@ class PLSQC():
     for i in range(len(self.times)-1): # go through each interval
       self.interpolants.append( Interpolant(ta=self.times[i], tb=self.times[i+1],
                                             tmid=(self.times[i]+self.times[i+1])/2,
-                                            coeffs=self.coeffs[istart:istart+self.deg+1]) )
+                                            coeffs=self.coeffs[istart:istart+self.deg+1],
+                                            ifirst=(i==0),
+                                            ilast=(i==len(self.times)-2)) )
       istart += self.deg + 1
       
   def __call__(self, xi, der=0):
@@ -196,32 +218,58 @@ class PLSQC():
     self.n_segments = len(self.times) - 1
     
     if t.ndim == 0:
-        ind = np.searchsorted(self.times, t, side='left')
-        segment = min(max(ind - 1, 0), self.n_segments - 1)
-        if not self.ascending:
-            segment = self.n_segments - 1 - segment
-        return self.interpolants[segment](t, der=der)
+      t = np.array([t.copy()])
+      bWasScalar = True
     else:
-      order = np.argsort(t)
-      reverse = np.empty_like(order)
-      reverse[order] = np.arange(order.shape[0])
-      t_sorted = t[order]
-  
-      segments = np.searchsorted(self.times, t_sorted, side='left')
-      segments -= 1
-      segments[segments < 0] = 0
-      segments[segments > self.n_segments - 1] = self.n_segments - 1
-      ys = []
-      group_start = 0
-      from itertools import groupby
-      for segment, group in groupby(segments):
-          group_end = group_start + len(list(group))
-          y = self.interpolants[segment](t_sorted[group_start:group_end], der=der)
-          ys.append(y)
-          group_start = group_end
-  
-      ys = np.hstack(ys)
-      ys = ys[reverse]
+      bWasScalar = False
+        # ind = np.searchsorted(self.times, t, side='left')
+        # segment = min(max(ind - 1, 0), self.n_segments - 1)
+        # # if not self.ascending:
+        #     # segment = self.n_segments - 1 - segment
+        # return self.interpolants[segment](t, der=der)
+    # else:
+      
+    order = np.argsort(t)
+    reverse = np.empty_like(order)
+    reverse[order] = np.arange(order.shape[0])
+    t_sorted = t[order]
+
+    segments = np.searchsorted(self.times, t_sorted, side='left')
+    segments -= 1
+    segments[segments < 0] = 0
+    segments[segments > self.n_segments - 1] = self.n_segments - 1
+    ys = []
+    group_start = 0
+    from itertools import groupby
+    for segment, group in groupby(segments):
+        group_end = group_start + len(list(group))
+        y = self.interpolants[segment](t_sorted[group_start:group_end], der=der)
+        ys.append(y)
+        group_start = group_end
+        
+    ys = np.hstack(ys)
+
+    # handle extrapolation
+    if self.extrap=="extrap":
+      pass # already computed with the interpolants
+    else:
+      Il = np.where(t_sorted<self.times[0])[0]
+      Ir = np.where(t_sorted>self.times[-1])[0]      
+
+      if self.extrap=="error":
+        if Ir.size>0 or Il.size>0:
+          raise ValueError('Extrapolation is forbidden')
+      elif self.extrap=="constant":
+        if Il.size>0:
+          ys[Il] = self.interpolants[0](self.times[0])
+        if Ir.size>0:
+          ys[Ir] = self.interpolants[-1](self.times[-1])
+      else:
+        raise ValueError(f'Extrapolation mode "{self.extrap}" unknown')
+        
+    ys = ys[reverse]
+    if bWasScalar:
+      return ys[0]
     return ys
   
   def _solve_constrained_lsq(self):
@@ -269,7 +317,7 @@ class PLSQC():
       assert self.x[imax]<=tip1
       
       # assert imax - imin > self.deg + 1 , 'not enough data points' # fit would be exact
-      if imax - imin <= self.deg + 1:
+      if imax - imin +1 < self.deg + 2:
         # import pdb; pdb.set_trace()
         print('not enough data points') # fit will be exact
         print('\twindow t = [{}, {}]'.format(ti, tip1))
@@ -411,7 +459,10 @@ class PLSQC():
         raise e
     elif self.mode==1:
       ## Sparse solve
-      global_matrix = scipy.sparse.csr_array( global_matrix )
+      try:
+          global_matrix = scipy.sparse.csr_array( global_matrix )
+      except AttributeError:  # Scipy too old ?
+          global_matrix = scipy.sparse.csr_matrix( global_matrix )
       sol = scipy.sparse.linalg.spsolve(global_matrix, b)
     else:
       raise ValueError(f'mode {self.mode} unknown')
