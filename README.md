@@ -1,4 +1,4 @@
-# **P**iecewise-polynomial **L**east-**SQ**uare Fit with **C**ontinuity constraints
+# **P**iecewise-polynomial **L**east-**SQ**uare fit with **C**ontinuity constraints
 *(PLSQC)*
 
 This Python package provides the PLSQC class which, given an input 1D array corresponding to a sampled signal, can compute a filtered signal and its derivatives.
@@ -29,3 +29,4 @@ Here is a comparison of the PLSQC result and the Savitzki-Golay filter from Scip
 Improvements for the future:
 * ~~Faster linear solution with sparse matrices.~~
 * Enable custom breakpoints to be specified instead of uniform window length. Each breakpoint should have a specified continuity constraint.
+* Add the ability to integrate the piecewise-polynomial fit.
