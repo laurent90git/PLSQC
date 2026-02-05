@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='PLSQC',
+    name='plsqc',
     version='1.0.0',
     url='https://github.com/laurent90git/PLSQC',
     author='Laurent François',
