@@ -22,8 +22,11 @@ Some information may be found on this topic :
 """
 import numpy as np
 import scipy.sparse
-import scipy.linalg    
-factorial = np.math.factorial
+import scipy.linalg
+try: 
+  factorial = np.math.factorial
+except:
+  from scipy.special import factorial
 
 def color_spy(matrix, normalise_each_row=False, logscale=True):
     """ plot sparsity pattern with colours depending on the magnitude of the components """
