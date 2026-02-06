@@ -158,10 +158,16 @@ class PLSQC():
   
   def __init__(self, x, y, deg=3, f=None, T=None, continuity=None,
                overlap=0.5, scale_with_overlap=True, debug=False, extrap='constant',
-               mode=1):
+               mode=1, drop_nans=True):
     self.x = x # data sampling point
     assert np.all(np.diff(x))>0, 'x must be sorted'
     self.y = y # noisy data
+
+    if drop_nans: # remove data points containing nans
+        if np.any(np.isnan(self.y)):
+            I = np.where(np.isnan(self.y))
+            self.y = np.delete( self.y, I)
+            self.x = np.delete( self.x, I)
     
     assert deg >= 0, 'deg must be >= 0'
     assert isinstance(deg, int), 'deg must be an int'
